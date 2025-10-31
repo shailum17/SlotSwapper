@@ -49,9 +49,9 @@ You'll need to set up the following environment variables in Vercel:
 4. Configure the project:
    - Framework Preset: Other
    - Root Directory: ./
-   - Build Command: `cd frontend && npm run build`
+   - Build Command: `npm run vercel-build`
    - Output Directory: `frontend/build`
-   - Install Command: `npm run install-all`
+   - Install Command: Leave empty (Vercel will auto-detect)
 
 5. Add environment variables in the project settings
 

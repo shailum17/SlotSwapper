@@ -8,7 +8,9 @@
     "dev:backend": "cd backend && npm run dev",
     "dev:frontend": "cd frontend && npm start",
     "build": "cd backend && npm run build && cd ../frontend && npm run build",
-    "test": "cd backend && npm test && cd ../frontend && npm test"
+    "build:frontend": "cd frontend && npm run build",
+    "test": "cd backend && npm test && cd ../frontend && npm test",
+    "vercel-build": "cd frontend && npm install && npm run build"
   },
   "keywords": ["slot-swapper", "scheduling", "peer-to-peer", "calendar"],
   "author": "",

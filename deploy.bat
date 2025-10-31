@@ -10,11 +10,12 @@ if %errorlevel% neq 0 (
 
 REM Install dependencies
 echo 📦 Installing dependencies...
-npm run install-all
+npm install
+cd backend && npm install && cd ../frontend && npm install && cd ..
 
 REM Build the project
 echo 🔨 Building project...
-cd frontend && npm run build && cd ..
+npm run vercel-build
 
 REM Deploy to Vercel
 echo 🌐 Deploying to Vercel...
