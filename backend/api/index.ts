@@ -11,16 +11,31 @@ const app = express();
 
 // Middleware
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || true,
-  credentials: true
+  origin: [
+    'https://slot-swapper-eight.vercel.app',
+    'http://localhost:3000',
+    'https://localhost:3000'
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Routes
+// Routes - Handle both /api and direct routes
 app.use('/api', routes);
+app.use('/', routes);
 
-// Health check endpoint
+// Health check endpoints
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'OK', 
+    message: 'SlotSwapper API is running',
+    timestamp: new Date().toISOString()
+  });
+});
+
 app.get('/api/health', (req, res) => {
   res.json({ 
     status: 'OK', 
