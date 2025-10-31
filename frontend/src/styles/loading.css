@@ -1,0 +1,125 @@
+/* Loading button styles */
+.button-loading {
+  position: relative;
+  pointer-events: none;
+}
+
+.button-loading:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+/* Loading state for various button types */
+.loading-button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: center;
+}
+
+.loading-button .loading-spinner {
+  margin: 0;
+}
+
+/* Refresh button loading styles */
+.refresh-button.loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: center;
+}
+
+.refresh-button.loading .loading-spinner {
+  margin: 0;
+}
+
+/* Status toggle button loading */
+.status-toggle-btn.loading {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+/* Action button loading */
+.accept-button.loading,
+.reject-button.loading,
+.delete-btn.loading {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+/* Submit button loading */
+.submit-button.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+/* Loading container styles */
+.loading-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+  padding: 40px;
+}
+
+.loading-container.full-height {
+  min-height: 400px;
+}
+
+/* Error state styles */
+.error-state {
+  text-align: center;
+  padding: 40px 20px;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.error-message {
+  color: #dc3545;
+  margin-bottom: 20px;
+  font-size: 1rem;
+}
+
+.retry-button {
+  background-color: #007bff;
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: background-color 0.2s;
+}
+
+.retry-button:hover {
+  background-color: #0056b3;
+}
+
+/* Disabled state for loading */
+button:disabled {
+  cursor: not-allowed;
+}
+
+button.loading:disabled {
+  opacity: 0.7;
+}
+
+/* Pulse animation for loading states */
+@keyframes pulse {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+.loading-pulse {
+  animation: pulse 1.5s ease-in-out infinite;
+}

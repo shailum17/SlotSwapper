@@ -1,3 +1,5 @@
-// Context exports placeholder
-// Will be implemented in task 7.1
-export {};
+export { AuthProvider, useAuth } from './AuthContext';
+export { EventProvider, useEvents } from './EventContext';
+export { SwapProvider, useSwap } from './SwapContext';
+export { StateManagerProvider, useStateManager } from './StateManagerContext';
+export { NotificationProvider, useNotification } from './NotificationContext';

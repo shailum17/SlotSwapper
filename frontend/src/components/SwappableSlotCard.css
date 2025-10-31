@@ -1,0 +1,157 @@
+.swappable-slot-card {
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 20px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  transition: box-shadow 0.2s, transform 0.2s;
+}
+
+.swappable-slot-card:hover {
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+  transform: translateY(-2px);
+}
+
+.slot-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 15px;
+}
+
+.slot-title {
+  margin: 0;
+  color: #333;
+  font-size: 1.2rem;
+  font-weight: 600;
+  flex: 1;
+  margin-right: 10px;
+}
+
+.slot-status {
+  flex-shrink: 0;
+}
+
+.status-badge {
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: uppercase;
+}
+
+.status-badge.swappable {
+  background-color: #e3f2fd;
+  color: #1976d2;
+}
+
+.slot-details {
+  margin-bottom: 20px;
+}
+
+.time-info {
+  margin-bottom: 15px;
+}
+
+.time-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 5px;
+}
+
+.time-label {
+  font-weight: 500;
+  color: #666;
+}
+
+.time-value {
+  color: #333;
+}
+
+.owner-info {
+  display: flex;
+  justify-content: space-between;
+  padding-top: 10px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.owner-label {
+  font-weight: 500;
+  color: #666;
+}
+
+.owner-name {
+  color: #333;
+  font-weight: 500;
+}
+
+.slot-actions {
+  margin-top: 15px;
+}
+
+.request-swap-button {
+  width: 100%;
+  background-color: #28a745;
+  color: white;
+  border: none;
+  padding: 12px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: background-color 0.2s;
+}
+
+.request-swap-button:hover {
+  background-color: #218838;
+}
+
+.request-swap-button:disabled {
+  background-color: #6c757d;
+  cursor: not-allowed;
+}
+
+.no-slots-message {
+  text-align: center;
+  padding: 15px;
+  background-color: #f8f9fa;
+  border-radius: 5px;
+  border: 1px solid #e9ecef;
+}
+
+.no-slots-message p {
+  margin: 0 0 5px 0;
+  color: #6c757d;
+  font-size: 14px;
+}
+
+.no-slots-message small {
+  color: #868e96;
+  font-size: 12px;
+}
+
+@media (max-width: 480px) {
+  .swappable-slot-card {
+    padding: 15px;
+  }
+
+  .slot-header {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .slot-title {
+    margin-right: 0;
+    font-size: 1.1rem;
+  }
+
+  .time-row {
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .owner-info {
+    flex-direction: column;
+    gap: 5px;
+  }
+}

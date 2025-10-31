@@ -1,3 +1,18 @@
-// Component exports placeholder
-// Will be implemented in subsequent tasks
-export {};
+export { default as LoginForm } from './LoginForm';
+export { default as SignupForm } from './SignupForm';
+export { default as AuthPage } from './AuthPage';
+export { default as ProtectedRoute } from './ProtectedRoute';
+export { default as Dashboard } from './Dashboard';
+export { default as CalendarDashboard } from './CalendarDashboard';
+export { default as EventCard } from './EventCard';
+export { default as CreateEventModal } from './CreateEventModal';
+export { default as Toast } from './Toast';
+export { default as MarketplaceView } from './MarketplaceView';
+export { default as SwappableSlotCard } from './SwappableSlotCard';
+export { default as SwapRequestModal } from './SwapRequestModal';
+export { default as NotificationsView } from './NotificationsView';
+export { default as IncomingRequestCard } from './IncomingRequestCard';
+export { default as OutgoingRequestCard } from './OutgoingRequestCard';
+export { default as ErrorBoundary } from './ErrorBoundary';
+export { default as NotificationContainer } from './NotificationContainer';
+export { default as LoadingSpinner } from './LoadingSpinner';

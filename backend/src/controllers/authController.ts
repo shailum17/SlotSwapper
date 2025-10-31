@@ -91,6 +91,50 @@ export const signup = async (req: Request, res: Response): Promise<void> => {
   }
 };
 
+// Token verification endpoint
+export const verifyToken = async (req: Request, res: Response): Promise<void> => {
+  try {
+    // The auth middleware has already verified the token and attached the user
+    // If we reach this point, the token is valid
+    const user = (req as any).user;
+    
+    if (!user) {
+      res.status(401).json({
+        success: false,
+        error: {
+          code: 'INVALID_TOKEN',
+          message: 'Invalid or expired token'
+        }
+      });
+      return;
+    }
+
+    // Return user data
+    res.status(200).json({
+      success: true,
+      data: {
+        user: {
+          _id: user._id,
+          name: user.name,
+          email: user.email,
+          createdAt: user.createdAt,
+          updatedAt: user.updatedAt
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Token verification error:', error);
+    res.status(500).json({
+      success: false,
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: 'An error occurred during token verification'
+      }
+    });
+  }
+};
+
 // User login endpoint
 export const login = async (req: Request, res: Response): Promise<void> => {
   try {
