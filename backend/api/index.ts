@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { connectDatabase } from '../src/config/database';
+import mongoose from 'mongoose';
 import routes from '../src/routes';
 
 // Load environment variables
@@ -9,38 +9,17 @@ dotenv.config();
 
 const app = express();
 
-// CORS configuration
-const corsOptions = {
-  origin: function (origin: any, callback: any) {
-    // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) return callback(null, true);
-    
-    const allowedOrigins = [
-      'https://slot-swapper-eight.vercel.app',
-      'http://localhost:3000',
-      'https://localhost:3000',
-      process.env.CORS_ORIGIN
-    ].filter(Boolean);
-    
-    console.log('Request origin:', origin);
-    console.log('Allowed origins:', allowedOrigins);
-    
-    if (allowedOrigins.indexOf(origin) !== -1) {
-      callback(null, true);
-    } else {
-      console.log('CORS blocked origin:', origin);
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
+// Simple and reliable CORS configuration
+app.use(cors({
+  origin: [
+    'https://slot-swapper-eight.vercel.app',
+    'http://localhost:3000',
+    'https://localhost:3000'
+  ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-  optionsSuccessStatus: 200 // Some legacy browsers choke on 204
-};
-
-app.use(cors(corsOptions));
-// Handle preflight requests
-app.options('*', cors(corsOptions));
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+}));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -66,23 +45,44 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// Initialize database connection
+// Initialize database connection for serverless
 let isConnected = false;
 
 const connectDB = async () => {
-  if (!isConnected) {
-    try {
-      await connectDatabase();
-      isConnected = true;
-    } catch (error) {
-      console.error('Failed to connect to database:', error);
-      throw error;
+  if (isConnected && mongoose.connection.readyState === 1) {
+    return;
+  }
+  
+  try {
+    const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017/slot-swapper';
+    
+    if (mongoose.connection.readyState === 0) {
+      await mongoose.connect(uri, {
+        maxPoolSize: 10,
+        serverSelectionTimeoutMS: 5000,
+        socketTimeoutMS: 45000,
+      });
     }
+    
+    isConnected = true;
+    console.log('Database connected successfully');
+  } catch (error) {
+    console.error('Database connection failed:', error);
+    isConnected = false;
+    throw error;
   }
 };
 
 // Serverless function handler
 export default async (req: any, res: any) => {
-  await connectDB();
-  return app(req, res);
+  try {
+    await connectDB();
+    return app(req, res);
+  } catch (error) {
+    console.error('Serverless function error:', error);
+    res.status(500).json({ 
+      error: 'Internal server error',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
 };
