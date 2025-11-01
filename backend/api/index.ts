@@ -139,9 +139,9 @@ app.get('/', (_req: any, res: any) => {
       },
       marketplace: 'GET /api/swappable-slots',
       swaps: {
-        list: 'GET /api/swap/requests',
-        create: 'POST /api/swap/requests',
-        respond: 'PUT /api/swap/requests/:id'
+        list: 'GET /api/swap/requests (or /api/swap/request)',
+        create: 'POST /api/swap/requests (or /api/swap/request)',
+        respond: 'PUT /api/swap/requests/:id (or /api/swap/request/:id)'
       }
     },
     timestamp: new Date().toISOString()
@@ -172,6 +172,49 @@ app.get('/api/health', (_req: any, res: any) => {
   res.json({ 
     status: 'OK', 
     message: 'SlotSwapper API is running',
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Debug endpoint to list all routes
+app.get('/api/routes', (_req: any, res: any) => {
+  const routes = [
+    'GET /health',
+    'GET /api/health',
+    'GET /api/routes',
+    'POST /api/auth/signup',
+    'POST /api/auth/login',
+    'GET /api/events',
+    'POST /api/events',
+    'PUT /api/events/:id',
+    'DELETE /api/events/:id',
+    'GET /api/swappable-slots',
+    'GET /api/swap/requests',
+    'POST /api/swap/requests',
+    'PUT /api/swap/requests/:id',
+    'GET /api/swap/request',
+    'POST /api/swap/request',
+    'PUT /api/swap/request/:id',
+    '--- Routes without /api prefix ---',
+    'POST /auth/signup',
+    'POST /auth/login',
+    'GET /events',
+    'POST /events',
+    'PUT /events/:id',
+    'DELETE /events/:id',
+    'GET /swappable-slots',
+    'GET /swap/requests',
+    'POST /swap/requests',
+    'PUT /swap/requests/:id',
+    'GET /swap/request',
+    'POST /swap/request',
+    'PUT /swap/request/:id'
+  ];
+  
+  res.json({
+    success: true,
+    message: 'Available API routes',
+    routes,
     timestamp: new Date().toISOString()
   });
 });
@@ -652,6 +695,189 @@ app.put('/api/swap/requests/:id', authenticateToken, [
   }
 });
 
+// SINGULAR API ROUTES (with /api prefix)
+// These match what your frontend might be calling: /api/swap/request (singular)
+
+app.get('/api/swap/request', authenticateToken, async (req: any, res: any) => {
+  try {
+    await connectToDatabase();
+    
+    const userId = req.user?.userId;
+    
+    // Get incoming requests (where user is the target)
+    const incoming = await SwapRequest.find({ 
+      targetUserId: userId,
+      status: 'PENDING'
+    })
+    .populate('requesterId', 'name email')
+    .populate('requesterEventId', 'title startTime endTime')
+    .populate('targetEventId', 'title startTime endTime');
+    
+    // Get outgoing requests (where user is the requester)
+    const outgoing = await SwapRequest.find({ 
+      requesterId: userId,
+      status: 'PENDING'
+    })
+    .populate('targetUserId', 'name email')
+    .populate('requesterEventId', 'title startTime endTime')
+    .populate('targetEventId', 'title startTime endTime');
+    
+    res.json({ 
+      success: true, 
+      data: { incoming, outgoing }
+    });
+  } catch (error) {
+    console.error('Get swap requests error:', error);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+});
+
+app.post('/api/swap/request', authenticateToken, [
+  body('targetEventId').notEmpty().withMessage('Target event ID is required'),
+  body('requesterEventId').notEmpty().withMessage('Requester event ID is required'),
+  body('message').optional().isString()
+], async (req: any, res: any) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, errors: errors.array() });
+    }
+
+    await connectToDatabase();
+
+    const { targetEventId, requesterEventId, message = '' } = req.body;
+    const requesterId = req.user?.userId;
+
+    // Verify the requester event belongs to the user
+    const requesterEvent = await Event.findOne({ 
+      _id: requesterEventId, 
+      userId: requesterId 
+    });
+    
+    if (!requesterEvent) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Requester event not found or not owned by user' 
+      });
+    }
+
+    // Verify the target event exists and is swappable
+    const targetEvent = await Event.findOne({ 
+      _id: targetEventId, 
+      status: 'SWAPPABLE' 
+    });
+    
+    if (!targetEvent) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Target event not found or not swappable' 
+      });
+    }
+
+    // Check if a request already exists
+    const existingRequest = await SwapRequest.findOne({
+      requesterId,
+      targetEventId,
+      requesterEventId,
+      status: 'PENDING'
+    });
+
+    if (existingRequest) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Swap request already exists' 
+      });
+    }
+
+    // Create the swap request
+    const swapRequest = new SwapRequest({
+      requesterId,
+      targetUserId: targetEvent.userId,
+      requesterEventId,
+      targetEventId,
+      message
+    });
+
+    await swapRequest.save();
+
+    // Populate the response
+    await swapRequest.populate([
+      { path: 'requesterId', select: 'name email' },
+      { path: 'targetUserId', select: 'name email' },
+      { path: 'requesterEventId', select: 'title startTime endTime' },
+      { path: 'targetEventId', select: 'title startTime endTime' }
+    ]);
+
+    res.status(201).json({ 
+      success: true, 
+      data: swapRequest 
+    });
+  } catch (error) {
+    console.error('Create swap request error:', error);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+});
+
+app.put('/api/swap/request/:id', authenticateToken, [
+  body('action').isIn(['accept', 'reject']).withMessage('Action must be accept or reject')
+], async (req: any, res: any) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, errors: errors.array() });
+    }
+
+    await connectToDatabase();
+
+    const { id } = req.params;
+    const { action } = req.body;
+    const userId = req.user?.userId;
+
+    // Find the swap request
+    const swapRequest = await SwapRequest.findOne({
+      _id: id,
+      targetUserId: userId,
+      status: 'PENDING'
+    });
+
+    if (!swapRequest) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Swap request not found or not authorized' 
+      });
+    }
+
+    if (action === 'accept') {
+      // Update swap request status
+      swapRequest.status = 'ACCEPTED';
+      await swapRequest.save();
+
+      // Update both events to SWAP_PENDING
+      await Event.findByIdAndUpdate(swapRequest.requesterEventId, { status: 'SWAP_PENDING' });
+      await Event.findByIdAndUpdate(swapRequest.targetEventId, { status: 'SWAP_PENDING' });
+
+      res.json({ 
+        success: true, 
+        message: 'Swap request accepted',
+        data: swapRequest 
+      });
+    } else {
+      // Reject the request
+      swapRequest.status = 'REJECTED';
+      await swapRequest.save();
+
+      res.json({ 
+        success: true, 
+        message: 'Swap request rejected',
+        data: swapRequest 
+      });
+    }
+  } catch (error) {
+    console.error('Update swap request error:', error);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+});
+
 // Routes without /api prefix (for frontend compatibility)
 app.get('/events', authenticateToken, async (req: any, res: any) => {
   try {
@@ -875,6 +1101,189 @@ app.post('/swap/requests', authenticateToken, [
 
 // Accept or reject swap request (without /api prefix)
 app.put('/swap/requests/:id', authenticateToken, [
+  body('action').isIn(['accept', 'reject']).withMessage('Action must be accept or reject')
+], async (req: any, res: any) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, errors: errors.array() });
+    }
+
+    await connectToDatabase();
+
+    const { id } = req.params;
+    const { action } = req.body;
+    const userId = req.user?.userId;
+
+    // Find the swap request
+    const swapRequest = await SwapRequest.findOne({
+      _id: id,
+      targetUserId: userId,
+      status: 'PENDING'
+    });
+
+    if (!swapRequest) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Swap request not found or not authorized' 
+      });
+    }
+
+    if (action === 'accept') {
+      // Update swap request status
+      swapRequest.status = 'ACCEPTED';
+      await swapRequest.save();
+
+      // Update both events to SWAP_PENDING
+      await Event.findByIdAndUpdate(swapRequest.requesterEventId, { status: 'SWAP_PENDING' });
+      await Event.findByIdAndUpdate(swapRequest.targetEventId, { status: 'SWAP_PENDING' });
+
+      res.json({ 
+        success: true, 
+        message: 'Swap request accepted',
+        data: swapRequest 
+      });
+    } else {
+      // Reject the request
+      swapRequest.status = 'REJECTED';
+      await swapRequest.save();
+
+      res.json({ 
+        success: true, 
+        message: 'Swap request rejected',
+        data: swapRequest 
+      });
+    }
+  } catch (error) {
+    console.error('Update swap request error:', error);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+});
+
+// SINGULAR ROUTES (for frontend compatibility)
+// These match what your frontend is calling: /swap/request (singular)
+
+app.get('/swap/request', authenticateToken, async (req: any, res: any) => {
+  try {
+    await connectToDatabase();
+    
+    const userId = req.user?.userId;
+    
+    // Get incoming requests (where user is the target)
+    const incoming = await SwapRequest.find({ 
+      targetUserId: userId,
+      status: 'PENDING'
+    })
+    .populate('requesterId', 'name email')
+    .populate('requesterEventId', 'title startTime endTime')
+    .populate('targetEventId', 'title startTime endTime');
+    
+    // Get outgoing requests (where user is the requester)
+    const outgoing = await SwapRequest.find({ 
+      requesterId: userId,
+      status: 'PENDING'
+    })
+    .populate('targetUserId', 'name email')
+    .populate('requesterEventId', 'title startTime endTime')
+    .populate('targetEventId', 'title startTime endTime');
+    
+    res.json({ 
+      success: true, 
+      data: { incoming, outgoing }
+    });
+  } catch (error) {
+    console.error('Get swap requests error:', error);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+});
+
+app.post('/swap/request', authenticateToken, [
+  body('targetEventId').notEmpty().withMessage('Target event ID is required'),
+  body('requesterEventId').notEmpty().withMessage('Requester event ID is required'),
+  body('message').optional().isString()
+], async (req: any, res: any) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, errors: errors.array() });
+    }
+
+    await connectToDatabase();
+
+    const { targetEventId, requesterEventId, message = '' } = req.body;
+    const requesterId = req.user?.userId;
+
+    // Verify the requester event belongs to the user
+    const requesterEvent = await Event.findOne({ 
+      _id: requesterEventId, 
+      userId: requesterId 
+    });
+    
+    if (!requesterEvent) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Requester event not found or not owned by user' 
+      });
+    }
+
+    // Verify the target event exists and is swappable
+    const targetEvent = await Event.findOne({ 
+      _id: targetEventId, 
+      status: 'SWAPPABLE' 
+    });
+    
+    if (!targetEvent) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Target event not found or not swappable' 
+      });
+    }
+
+    // Check if a request already exists
+    const existingRequest = await SwapRequest.findOne({
+      requesterId,
+      targetEventId,
+      requesterEventId,
+      status: 'PENDING'
+    });
+
+    if (existingRequest) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Swap request already exists' 
+      });
+    }
+
+    // Create the swap request
+    const swapRequest = new SwapRequest({
+      requesterId,
+      targetUserId: targetEvent.userId,
+      requesterEventId,
+      targetEventId,
+      message
+    });
+
+    await swapRequest.save();
+
+    // Populate the response
+    await swapRequest.populate([
+      { path: 'requesterId', select: 'name email' },
+      { path: 'targetUserId', select: 'name email' },
+      { path: 'requesterEventId', select: 'title startTime endTime' },
+      { path: 'targetEventId', select: 'title startTime endTime' }
+    ]);
+
+    res.status(201).json({ 
+      success: true, 
+      data: swapRequest 
+    });
+  } catch (error) {
+    console.error('Create swap request error:', error);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+});
+
+app.put('/swap/request/:id', authenticateToken, [
   body('action').isIn(['accept', 'reject']).withMessage('Action must be accept or reject')
 ], async (req: any, res: any) => {
   try {
