@@ -103,17 +103,22 @@ const SwapRequest = mongoose.models.SwapRequest || mongoose.model('SwapRequest',
 
 // Auth middleware
 const authenticateToken = (req: any, res: any, next: any) => {
+  console.log('Auth middleware - Headers:', req.headers.authorization ? 'Token present' : 'No token');
+  
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
 
   if (!token) {
+    console.log('Auth middleware - No token provided');
     return res.status(401).json({ success: false, message: 'Access token required' });
   }
 
   jwt.verify(token, process.env.JWT_SECRET || 'fallback-secret', (err: any, decoded: any) => {
     if (err) {
-      return res.status(403).json({ success: false, message: 'Invalid token' });
+      console.log('Auth middleware - Token verification failed:', err.message);
+      return res.status(403).json({ success: false, message: 'Invalid token', error: err.message });
     }
+    console.log('Auth middleware - Token verified, userId:', decoded.userId);
     req.user = { userId: decoded.userId };
     next();
   });
@@ -215,6 +220,35 @@ app.get('/api/routes', (_req: any, res: any) => {
     success: true,
     message: 'Available API routes',
     routes,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Test endpoint for debugging (no auth required)
+app.post('/api/test-post', (req: any, res: any) => {
+  console.log('Test POST endpoint hit');
+  console.log('Headers:', req.headers);
+  console.log('Body:', req.body);
+  
+  res.json({
+    success: true,
+    message: 'Test POST endpoint working',
+    receivedHeaders: req.headers,
+    receivedBody: req.body,
+    timestamp: new Date().toISOString()
+  });
+});
+
+app.post('/test-post', (req: any, res: any) => {
+  console.log('Test POST endpoint (no /api) hit');
+  console.log('Headers:', req.headers);
+  console.log('Body:', req.body);
+  
+  res.json({
+    success: true,
+    message: 'Test POST endpoint (no /api) working',
+    receivedHeaders: req.headers,
+    receivedBody: req.body,
     timestamp: new Date().toISOString()
   });
 });
@@ -1203,16 +1237,24 @@ app.post('/swap/request', authenticateToken, [
   body('message').optional().isString()
 ], async (req: any, res: any) => {
   try {
+    console.log('POST /swap/request - Request body:', req.body);
+    console.log('POST /swap/request - User:', req.user);
+    
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
+      console.log('Validation errors:', errors.array());
       return res.status(400).json({ success: false, errors: errors.array() });
     }
 
+    console.log('Connecting to database...');
     await connectToDatabase();
+    console.log('Database connected successfully');
 
     const { targetEventId, requesterEventId, message = '' } = req.body;
     const requesterId = req.user?.userId;
 
+    console.log('Looking for requester event:', { requesterEventId, requesterId });
+    
     // Verify the requester event belongs to the user
     const requesterEvent = await Event.findOne({ 
       _id: requesterEventId, 
@@ -1220,11 +1262,15 @@ app.post('/swap/request', authenticateToken, [
     });
     
     if (!requesterEvent) {
+      console.log('Requester event not found');
       return res.status(404).json({ 
         success: false, 
         message: 'Requester event not found or not owned by user' 
       });
     }
+
+    console.log('Found requester event:', requesterEvent);
+    console.log('Looking for target event:', { targetEventId });
 
     // Verify the target event exists and is swappable
     const targetEvent = await Event.findOne({ 
@@ -1233,11 +1279,14 @@ app.post('/swap/request', authenticateToken, [
     });
     
     if (!targetEvent) {
+      console.log('Target event not found or not swappable');
       return res.status(404).json({ 
         success: false, 
         message: 'Target event not found or not swappable' 
       });
     }
+
+    console.log('Found target event:', targetEvent);
 
     // Check if a request already exists
     const existingRequest = await SwapRequest.findOne({
@@ -1248,11 +1297,14 @@ app.post('/swap/request', authenticateToken, [
     });
 
     if (existingRequest) {
+      console.log('Swap request already exists');
       return res.status(400).json({ 
         success: false, 
         message: 'Swap request already exists' 
       });
     }
+
+    console.log('Creating new swap request...');
 
     // Create the swap request
     const swapRequest = new SwapRequest({
@@ -1264,6 +1316,7 @@ app.post('/swap/request', authenticateToken, [
     });
 
     await swapRequest.save();
+    console.log('Swap request saved successfully');
 
     // Populate the response
     await swapRequest.populate([
@@ -1273,13 +1326,19 @@ app.post('/swap/request', authenticateToken, [
       { path: 'targetEventId', select: 'title startTime endTime' }
     ]);
 
+    console.log('Swap request populated and ready to return');
+
     res.status(201).json({ 
       success: true, 
       data: swapRequest 
     });
   } catch (error) {
     console.error('Create swap request error:', error);
-    res.status(500).json({ success: false, message: 'Internal server error' });
+    res.status(500).json({ 
+      success: false, 
+      message: 'Internal server error',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 
