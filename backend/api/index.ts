@@ -142,7 +142,7 @@ app.get('/api/health', (_req: any, res: any) => {
   });
 });
 
-// Auth routes
+// Auth routes (with /api prefix)
 app.post('/api/auth/signup', [
   body('name').notEmpty().withMessage('Name is required'),
   body('email').isEmail().withMessage('Valid email is required'),
@@ -192,6 +192,101 @@ app.post('/api/auth/signup', [
 });
 
 app.post('/api/auth/login', [
+  body('email').isEmail().withMessage('Valid email is required'),
+  body('password').notEmpty().withMessage('Password is required')
+], async (req: any, res: any) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, errors: errors.array() });
+    }
+
+    await connectToDatabase();
+
+    const { email, password } = req.body;
+
+    // Find user
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(401).json({ success: false, message: 'Invalid credentials' });
+    }
+
+    // Check password
+    const isValidPassword = await bcrypt.compare(password, user.passwordHash);
+    if (!isValidPassword) {
+      return res.status(401).json({ success: false, message: 'Invalid credentials' });
+    }
+
+    // Generate token
+    const token = jwt.sign(
+      { userId: user._id }, 
+      process.env.JWT_SECRET || 'fallback-secret',
+      { expiresIn: '24h' }
+    );
+
+    res.json({
+      success: true,
+      data: {
+        user: { _id: user._id, name: user.name, email: user.email },
+        token
+      }
+    });
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+});
+
+// Auth routes (without /api prefix - for frontend compatibility)
+app.post('/auth/signup', [
+  body('name').notEmpty().withMessage('Name is required'),
+  body('email').isEmail().withMessage('Valid email is required'),
+  body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters')
+], async (req: any, res: any) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, errors: errors.array() });
+    }
+
+    await connectToDatabase();
+
+    const { name, email, password } = req.body;
+
+    // Check if user exists
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(400).json({ success: false, message: 'User already exists' });
+    }
+
+    // Hash password
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    // Create user
+    const user = new User({ name, email, passwordHash });
+    await user.save();
+
+    // Generate token
+    const token = jwt.sign(
+      { userId: user._id }, 
+      process.env.JWT_SECRET || 'fallback-secret',
+      { expiresIn: '24h' }
+    );
+
+    res.status(201).json({
+      success: true,
+      data: {
+        user: { _id: user._id, name: user.name, email: user.email },
+        token
+      }
+    });
+  } catch (error) {
+    console.error('Signup error:', error);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+});
+
+app.post('/auth/login', [
   body('email').isEmail().withMessage('Valid email is required'),
   body('password').notEmpty().withMessage('Password is required')
 ], async (req: any, res: any) => {
@@ -342,6 +437,119 @@ app.delete('/api/events/:id', authenticateToken, async (req: any, res: any) => {
 
 // Swap requests placeholder
 app.get('/api/swap/requests', authenticateToken, async (_req: any, res: any) => {
+  try {
+    // Placeholder for swap requests
+    res.json({ 
+      success: true, 
+      data: { incoming: [], outgoing: [] }
+    });
+  } catch (error) {
+    console.error('Get swap requests error:', error);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+});
+
+// Routes without /api prefix (for frontend compatibility)
+app.get('/events', authenticateToken, async (req: any, res: any) => {
+  try {
+    await connectToDatabase();
+    const events = await Event.find({ userId: req.user?.userId });
+    res.json({ success: true, data: events });
+  } catch (error) {
+    console.error('Get events error:', error);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+});
+
+app.post('/events', authenticateToken, [
+  body('title').notEmpty().withMessage('Title is required'),
+  body('startTime').isISO8601().withMessage('Valid start time is required'),
+  body('endTime').isISO8601().withMessage('Valid end time is required')
+], async (req: any, res: any) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, errors: errors.array() });
+    }
+
+    await connectToDatabase();
+
+    const { title, startTime, endTime } = req.body;
+    
+    const event = new Event({
+      userId: req.user?.userId,
+      title,
+      startTime: new Date(startTime),
+      endTime: new Date(endTime)
+    });
+
+    await event.save();
+    res.status(201).json({ success: true, data: event });
+  } catch (error) {
+    console.error('Create event error:', error);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+});
+
+app.put('/events/:id', authenticateToken, async (req: any, res: any) => {
+  try {
+    await connectToDatabase();
+    
+    const { id } = req.params;
+    const { status } = req.body;
+    
+    const event = await Event.findOneAndUpdate(
+      { _id: id, userId: req.user?.userId },
+      { status },
+      { new: true }
+    );
+    
+    if (!event) {
+      return res.status(404).json({ success: false, message: 'Event not found' });
+    }
+    
+    res.json({ success: true, data: event });
+  } catch (error) {
+    console.error('Update event error:', error);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+});
+
+app.delete('/events/:id', authenticateToken, async (req: any, res: any) => {
+  try {
+    await connectToDatabase();
+    
+    const { id } = req.params;
+    
+    const event = await Event.findOneAndDelete({ _id: id, userId: req.user?.userId });
+    
+    if (!event) {
+      return res.status(404).json({ success: false, message: 'Event not found' });
+    }
+    
+    res.json({ success: true, message: 'Event deleted successfully' });
+  } catch (error) {
+    console.error('Delete event error:', error);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+});
+
+app.get('/swappable-slots', authenticateToken, async (req: any, res: any) => {
+  try {
+    await connectToDatabase();
+    const slots = await Event.find({ 
+      status: 'SWAPPABLE',
+      userId: { $ne: req.user?.userId }
+    }).populate('userId', 'name email');
+    
+    res.json({ success: true, data: slots });
+  } catch (error) {
+    console.error('Get swappable slots error:', error);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+});
+
+app.get('/swap/requests', authenticateToken, async (_req: any, res: any) => {
   try {
     // Placeholder for swap requests
     res.json({ 
