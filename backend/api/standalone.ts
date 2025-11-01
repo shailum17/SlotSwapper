@@ -91,11 +91,45 @@ const authenticateToken = (req: any, res: any, next: any) => {
   });
 };
 
+// Root endpoint
+app.get('/', (_req: any, res: any) => {
+  res.json({
+    success: true,
+    message: 'SlotSwapper API',
+    version: '1.0.0',
+    endpoints: {
+      health: '/health',
+      auth: {
+        signup: 'POST /api/auth/signup',
+        login: 'POST /api/auth/login'
+      },
+      events: {
+        list: 'GET /api/events',
+        create: 'POST /api/events',
+        update: 'PUT /api/events/:id',
+        delete: 'DELETE /api/events/:id'
+      },
+      marketplace: 'GET /api/swappable-slots',
+      swaps: 'GET /api/swap/requests'
+    },
+    timestamp: new Date().toISOString()
+  });
+});
+
 // Health endpoints
 app.get('/health', (_req: any, res: any) => {
   res.json({ 
     status: 'OK', 
     message: 'SlotSwapper API is running',
+    timestamp: new Date().toISOString()
+  });
+});
+
+app.get('/api', (_req: any, res: any) => {
+  res.json({
+    success: true,
+    message: 'SlotSwapper API v1.0.0',
+    documentation: 'Visit / for endpoint documentation',
     timestamp: new Date().toISOString()
   });
 });
