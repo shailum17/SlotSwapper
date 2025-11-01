@@ -24,6 +24,7 @@ app.use(express.json());
 let cachedConnection: typeof mongoose | null = null;
 
 const connectToDatabase = async () => {
+  // Check if we have a cached connection and it's still connected
   if (cachedConnection && mongoose.connection.readyState === 1) {
     return cachedConnection;
   }
@@ -31,20 +32,31 @@ const connectToDatabase = async () => {
   try {
     const mongoUri = process.env.MONGODB_URI;
     if (!mongoUri) {
+      console.error('MONGODB_URI environment variable is not set');
       throw new Error('MONGODB_URI environment variable is not set');
+    }
+
+    console.log('Connecting to MongoDB...');
+    
+    // Disconnect any existing connection first
+    if (mongoose.connection.readyState !== 0) {
+      await mongoose.disconnect();
     }
 
     const connection = await mongoose.connect(mongoUri, {
       bufferCommands: false,
-      maxPoolSize: 10,
-      serverSelectionTimeoutMS: 5000,
+      maxPoolSize: 1, // Reduced for serverless
+      serverSelectionTimeoutMS: 10000, // Increased timeout
       socketTimeoutMS: 45000,
+      family: 4, // Use IPv4, skip trying IPv6
     });
 
+    console.log('MongoDB connected successfully');
     cachedConnection = connection;
     return connection;
   } catch (error) {
     console.error('Database connection error:', error);
+    cachedConnection = null;
     throw error;
   }
 };
@@ -141,7 +153,9 @@ app.get('/health', (_req: any, res: any) => {
   res.json({ 
     status: 'OK', 
     message: 'SlotSwapper API is running',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'unknown',
+    mongoUri: process.env.MONGODB_URI ? 'configured' : 'missing'
   });
 });
 
@@ -941,8 +955,22 @@ app.use('*', (req: any, res: any) => {
 // Serverless handler
 export default async (req: any, res: any) => {
   try {
-    // Set CORS headers
-    res.setHeader('Access-Control-Allow-Origin', 'https://slot-swapper-eight.vercel.app');
+    console.log(`${req.method} ${req.url} - Origin: ${req.headers.origin}`);
+    
+    // Dynamic CORS headers
+    const origin = req.headers.origin;
+    const allowedOrigins = [
+      'https://slot-swapper-eight.vercel.app',
+      'http://localhost:3000'
+    ];
+    
+    if (allowedOrigins.includes(origin)) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+    } else {
+      // Fallback for development
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     res.setHeader('Access-Control-Allow-Credentials', 'true');
@@ -958,7 +986,8 @@ export default async (req: any, res: any) => {
     if (!res.headersSent) {
       res.status(500).json({
         success: false,
-        message: 'Serverless function error'
+        message: 'Serverless function error',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
       });
     }
   }
