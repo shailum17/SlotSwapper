@@ -253,6 +253,74 @@ app.post('/test-post', (req: any, res: any) => {
   });
 });
 
+// Debug endpoint to check events (requires auth)
+app.get('/api/debug/events', authenticateToken, async (req: any, res: any) => {
+  try {
+    await connectToDatabase();
+    
+    const userId = req.user?.userId;
+    
+    // Get user's events
+    const userEvents = await Event.find({ userId }).select('_id title status startTime endTime');
+    
+    // Get all swappable events (from other users)
+    const swappableEvents = await Event.find({ 
+      status: 'SWAPPABLE',
+      userId: { $ne: userId }
+    }).populate('userId', 'name email').select('_id title status startTime endTime userId');
+    
+    // Get existing swap requests
+    const swapRequests = await SwapRequest.find({
+      $or: [
+        { requesterId: userId },
+        { targetUserId: userId }
+      ]
+    }).select('_id requesterId targetUserId requesterEventId targetEventId status');
+    
+    res.json({
+      success: true,
+      data: {
+        userEvents,
+        swappableEvents,
+        swapRequests,
+        userId
+      }
+    });
+  } catch (error) {
+    console.error('Debug events error:', error);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+});
+
+// Debug endpoint to validate ObjectIds
+app.post('/api/debug/validate-ids', (req: any, res: any) => {
+  const { targetEventId, requesterEventId, userId } = req.body;
+  
+  const validation = {
+    targetEventId: {
+      value: targetEventId,
+      isValid: mongoose.Types.ObjectId.isValid(targetEventId),
+      type: typeof targetEventId
+    },
+    requesterEventId: {
+      value: requesterEventId,
+      isValid: mongoose.Types.ObjectId.isValid(requesterEventId),
+      type: typeof requesterEventId
+    },
+    userId: {
+      value: userId,
+      isValid: mongoose.Types.ObjectId.isValid(userId),
+      type: typeof userId
+    }
+  };
+  
+  res.json({
+    success: true,
+    validation,
+    allValid: validation.targetEventId.isValid && validation.requesterEventId.isValid && validation.userId.isValid
+  });
+});
+
 // Auth routes (with /api prefix)
 app.post('/api/auth/signup', [
   body('name').notEmpty().withMessage('Name is required'),
@@ -583,8 +651,8 @@ app.get('/api/swap/requests', authenticateToken, async (req: any, res: any) => {
 
 // Create swap request
 app.post('/api/swap/requests', authenticateToken, [
-  body('targetEventId').notEmpty().withMessage('Target event ID is required'),
-  body('requesterEventId').notEmpty().withMessage('Requester event ID is required'),
+  body('targetEventId').notEmpty().withMessage('Target event ID is required').isMongoId().withMessage('Target event ID must be a valid MongoDB ObjectId'),
+  body('requesterEventId').notEmpty().withMessage('Requester event ID is required').isMongoId().withMessage('Requester event ID must be a valid MongoDB ObjectId'),
   body('message').optional().isString()
 ], async (req: any, res: any) => {
   try {
@@ -767,8 +835,8 @@ app.get('/api/swap/request', authenticateToken, async (req: any, res: any) => {
 });
 
 app.post('/api/swap/request', authenticateToken, [
-  body('targetEventId').notEmpty().withMessage('Target event ID is required'),
-  body('requesterEventId').notEmpty().withMessage('Requester event ID is required'),
+  body('targetEventId').notEmpty().withMessage('Target event ID is required').isMongoId().withMessage('Target event ID must be a valid MongoDB ObjectId'),
+  body('requesterEventId').notEmpty().withMessage('Requester event ID is required').isMongoId().withMessage('Requester event ID must be a valid MongoDB ObjectId'),
   body('message').optional().isString()
 ], async (req: any, res: any) => {
   try {
@@ -1048,8 +1116,8 @@ app.get('/swap/requests', authenticateToken, async (req: any, res: any) => {
 
 // Create swap request (without /api prefix)
 app.post('/swap/requests', authenticateToken, [
-  body('targetEventId').notEmpty().withMessage('Target event ID is required'),
-  body('requesterEventId').notEmpty().withMessage('Requester event ID is required'),
+  body('targetEventId').notEmpty().withMessage('Target event ID is required').isMongoId().withMessage('Target event ID must be a valid MongoDB ObjectId'),
+  body('requesterEventId').notEmpty().withMessage('Requester event ID is required').isMongoId().withMessage('Requester event ID must be a valid MongoDB ObjectId'),
   body('message').optional().isString()
 ], async (req: any, res: any) => {
   try {
@@ -1232,8 +1300,8 @@ app.get('/swap/request', authenticateToken, async (req: any, res: any) => {
 });
 
 app.post('/swap/request', authenticateToken, [
-  body('targetEventId').notEmpty().withMessage('Target event ID is required'),
-  body('requesterEventId').notEmpty().withMessage('Requester event ID is required'),
+  body('targetEventId').notEmpty().withMessage('Target event ID is required').isMongoId().withMessage('Target event ID must be a valid MongoDB ObjectId'),
+  body('requesterEventId').notEmpty().withMessage('Requester event ID is required').isMongoId().withMessage('Requester event ID must be a valid MongoDB ObjectId'),
   body('message').optional().isString()
 ], async (req: any, res: any) => {
   try {
@@ -1253,16 +1321,44 @@ app.post('/swap/request', authenticateToken, [
     const { targetEventId, requesterEventId, message = '' } = req.body;
     const requesterId = req.user?.userId;
 
+    // Validate ObjectIds
+    if (!mongoose.Types.ObjectId.isValid(targetEventId)) {
+      console.log('Invalid targetEventId format:', targetEventId);
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Invalid target event ID format' 
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(requesterEventId)) {
+      console.log('Invalid requesterEventId format:', requesterEventId);
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Invalid requester event ID format' 
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(requesterId)) {
+      console.log('Invalid requesterId format:', requesterId);
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Invalid user ID format' 
+      });
+    }
+
     console.log('Looking for requester event:', { requesterEventId, requesterId });
     
     // Verify the requester event belongs to the user
     const requesterEvent = await Event.findOne({ 
-      _id: requesterEventId, 
-      userId: requesterId 
+      _id: new mongoose.Types.ObjectId(requesterEventId), 
+      userId: new mongoose.Types.ObjectId(requesterId)
     });
     
     if (!requesterEvent) {
       console.log('Requester event not found');
+      // Let's also check if the event exists at all
+      const eventExists = await Event.findById(requesterEventId);
+      console.log('Event exists but wrong owner?', !!eventExists);
       return res.status(404).json({ 
         success: false, 
         message: 'Requester event not found or not owned by user' 
@@ -1274,12 +1370,18 @@ app.post('/swap/request', authenticateToken, [
 
     // Verify the target event exists and is swappable
     const targetEvent = await Event.findOne({ 
-      _id: targetEventId, 
+      _id: new mongoose.Types.ObjectId(targetEventId), 
       status: 'SWAPPABLE' 
     });
     
     if (!targetEvent) {
       console.log('Target event not found or not swappable');
+      // Let's check if the event exists but with wrong status
+      const eventExists = await Event.findById(targetEventId);
+      console.log('Target event exists?', !!eventExists);
+      if (eventExists) {
+        console.log('Target event status:', eventExists.status);
+      }
       return res.status(404).json({ 
         success: false, 
         message: 'Target event not found or not swappable' 
@@ -1288,11 +1390,20 @@ app.post('/swap/request', authenticateToken, [
 
     console.log('Found target event:', targetEvent);
 
+    // Prevent self-swapping
+    if (targetEvent.userId.toString() === requesterId.toString()) {
+      console.log('User trying to swap with themselves');
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Cannot create swap request with your own event' 
+      });
+    }
+
     // Check if a request already exists
     const existingRequest = await SwapRequest.findOne({
-      requesterId,
-      targetEventId,
-      requesterEventId,
+      requesterId: new mongoose.Types.ObjectId(requesterId),
+      targetEventId: new mongoose.Types.ObjectId(targetEventId),
+      requesterEventId: new mongoose.Types.ObjectId(requesterEventId),
       status: 'PENDING'
     });
 
@@ -1308,10 +1419,10 @@ app.post('/swap/request', authenticateToken, [
 
     // Create the swap request
     const swapRequest = new SwapRequest({
-      requesterId,
-      targetUserId: targetEvent.userId,
-      requesterEventId,
-      targetEventId,
+      requesterId: new mongoose.Types.ObjectId(requesterId),
+      targetUserId: new mongoose.Types.ObjectId(targetEvent.userId),
+      requesterEventId: new mongoose.Types.ObjectId(requesterEventId),
+      targetEventId: new mongoose.Types.ObjectId(targetEventId),
       message
     });
 
@@ -1334,10 +1445,11 @@ app.post('/swap/request', authenticateToken, [
     });
   } catch (error) {
     console.error('Create swap request error:', error);
+    console.error('Error stack:', error.stack);
     res.status(500).json({ 
       success: false, 
       message: 'Internal server error',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Server error'
     });
   }
 });
