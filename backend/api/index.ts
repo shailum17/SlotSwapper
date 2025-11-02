@@ -253,6 +253,87 @@ app.post('/test-post', (req: any, res: any) => {
   });
 });
 
+// ULTRA-SIMPLE SWAP REQUEST (bypasses all complex logic)
+app.post('/api/simple-swap', authenticateToken, async (req: any, res: any) => {
+  try {
+    console.log('🔥 SIMPLE SWAP REQUEST ATTEMPT');
+    
+    const { targetEventId, requesterEventId } = req.body;
+    const userId = req.user?.userId;
+    
+    // Minimal validation
+    if (!targetEventId || !requesterEventId || !userId) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Missing required fields' 
+      });
+    }
+    
+    // Connect to DB
+    await connectToDatabase();
+    
+    // Create swap request with minimal data
+    const swapRequest = {
+      requesterId: userId,
+      targetUserId: 'temp-target-user', // We'll fix this later
+      requesterEventId,
+      targetEventId,
+      message: 'Simple swap request',
+      status: 'PENDING',
+      createdAt: new Date()
+    };
+    
+    // Try to save directly
+    const result = await SwapRequest.create(swapRequest);
+    
+    console.log('✅ Simple swap request created:', result._id);
+    
+    res.status(201).json({
+      success: true,
+      data: result,
+      message: 'Simple swap request created successfully'
+    });
+    
+  } catch (error) {
+    console.error('❌ Simple swap request failed:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Simple swap request failed',
+      error: error.message
+    });
+  }
+});
+
+// MINIMAL SWAP REQUEST (even simpler)
+app.post('/api/minimal-swap', authenticateToken, async (req: any, res: any) => {
+  try {
+    await connectToDatabase();
+    
+    const swapRequest = new SwapRequest({
+      requesterId: req.user.userId,
+      targetUserId: req.user.userId, // Same user for testing
+      requesterEventId: req.body.requesterEventId || '507f1f77bcf86cd799439011',
+      targetEventId: req.body.targetEventId || '507f1f77bcf86cd799439012',
+      message: 'Minimal test swap',
+      status: 'PENDING'
+    });
+    
+    await swapRequest.save();
+    
+    res.json({
+      success: true,
+      data: swapRequest,
+      message: 'Minimal swap created'
+    });
+    
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 // Debug endpoint to check events (requires auth)
 app.get('/api/debug/events', authenticateToken, async (req: any, res: any) => {
   try {
@@ -319,6 +400,185 @@ app.post('/api/debug/validate-ids', (req: any, res: any) => {
     validation,
     allValid: validation.targetEventId.isValid && validation.requesterEventId.isValid && validation.userId.isValid
   });
+});
+
+// PRODUCTION DIAGNOSTIC ENDPOINT
+app.get('/api/production/diagnostics', authenticateToken, async (req: any, res: any) => {
+  try {
+    const startTime = Date.now();
+    const diagnostics: any = {
+      timestamp: new Date().toISOString(),
+      environment: process.env.NODE_ENV || 'unknown',
+      checks: {}
+    };
+
+    // 1. Database connectivity
+    try {
+      const dbStart = Date.now();
+      await connectToDatabase();
+      diagnostics.checks.database = {
+        status: 'connected',
+        responseTime: Date.now() - dbStart,
+        mongoUri: process.env.MONGODB_URI ? 'configured' : 'missing'
+      };
+    } catch (error) {
+      diagnostics.checks.database = {
+        status: 'failed',
+        error: error.message
+      };
+    }
+
+    // 2. User authentication
+    diagnostics.checks.auth = {
+      userId: req.user?.userId || 'missing',
+      userIdValid: mongoose.Types.ObjectId.isValid(req.user?.userId || ''),
+      jwtSecret: process.env.JWT_SECRET ? 'configured' : 'missing'
+    };
+
+    // 3. Collections check
+    try {
+      const [userCount, eventCount, swapCount] = await Promise.all([
+        User.countDocuments(),
+        Event.countDocuments(),
+        SwapRequest.countDocuments()
+      ]);
+      
+      diagnostics.checks.collections = {
+        users: userCount,
+        events: eventCount,
+        swapRequests: swapCount
+      };
+    } catch (error) {
+      diagnostics.checks.collections = {
+        error: error.message
+      };
+    }
+
+    // 4. User's data check
+    if (req.user?.userId) {
+      try {
+        const userId = new mongoose.Types.ObjectId(req.user.userId);
+        const [userEvents, userSwapRequests] = await Promise.all([
+          Event.find({ userId }).countDocuments(),
+          SwapRequest.find({ 
+            $or: [{ requesterId: userId }, { targetUserId: userId }] 
+          }).countDocuments()
+        ]);
+        
+        diagnostics.checks.userData = {
+          userEvents,
+          userSwapRequests
+        };
+      } catch (error) {
+        diagnostics.checks.userData = {
+          error: error.message
+        };
+      }
+    }
+
+    // 5. Memory and performance
+    diagnostics.checks.performance = {
+      totalExecutionTime: Date.now() - startTime,
+      memoryUsage: process.memoryUsage(),
+      uptime: process.uptime()
+    };
+
+    res.json({
+      success: true,
+      diagnostics
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Diagnostics failed',
+      error: error.message
+    });
+  }
+});
+
+// SIMPLE SWAP REQUEST TEST ENDPOINT
+app.post('/api/test/swap-request', authenticateToken, async (req: any, res: any) => {
+  try {
+    console.log('🧪 Testing swap request creation process...');
+    
+    const { targetEventId, requesterEventId } = req.body;
+    const userId = req.user?.userId;
+    
+    const testResults: any = {
+      timestamp: new Date().toISOString(),
+      steps: {}
+    };
+
+    // Step 1: Validate inputs
+    testResults.steps.inputValidation = {
+      targetEventId: !!targetEventId,
+      requesterEventId: !!requesterEventId,
+      userId: !!userId,
+      targetEventIdFormat: mongoose.Types.ObjectId.isValid(targetEventId || ''),
+      requesterEventIdFormat: mongoose.Types.ObjectId.isValid(requesterEventId || ''),
+      userIdFormat: mongoose.Types.ObjectId.isValid(userId || '')
+    };
+
+    if (!targetEventId || !requesterEventId || !userId) {
+      return res.json({ success: true, testResults, stopped: 'Missing required fields' });
+    }
+
+    // Step 2: Database connection
+    try {
+      await connectToDatabase();
+      testResults.steps.database = { status: 'connected' };
+    } catch (error) {
+      testResults.steps.database = { status: 'failed', error: error.message };
+      return res.json({ success: true, testResults, stopped: 'Database connection failed' });
+    }
+
+    // Step 3: Check events exist
+    try {
+      const [requesterEvent, targetEvent] = await Promise.all([
+        Event.findById(requesterEventId),
+        Event.findById(targetEventId)
+      ]);
+      
+      testResults.steps.eventCheck = {
+        requesterEventExists: !!requesterEvent,
+        targetEventExists: !!targetEvent,
+        requesterEventOwnership: requesterEvent?.userId?.toString() === userId,
+        targetEventStatus: targetEvent?.status || 'not found'
+      };
+    } catch (error) {
+      testResults.steps.eventCheck = { error: error.message };
+    }
+
+    // Step 4: Check existing swap requests
+    try {
+      const existing = await SwapRequest.findOne({
+        requesterId: new mongoose.Types.ObjectId(userId),
+        targetEventId: new mongoose.Types.ObjectId(targetEventId),
+        requesterEventId: new mongoose.Types.ObjectId(requesterEventId)
+      });
+      
+      testResults.steps.duplicateCheck = {
+        existingRequest: !!existing,
+        existingStatus: existing?.status || 'none'
+      };
+    } catch (error) {
+      testResults.steps.duplicateCheck = { error: error.message };
+    }
+
+    res.json({
+      success: true,
+      testResults,
+      message: 'Test completed - check steps for issues'
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Test failed',
+      error: error.message
+    });
+  }
 });
 
 // Check swap request status (helps with auto-refresh scenarios)
@@ -1385,216 +1645,158 @@ app.get('/swap/request', authenticateToken, async (req: any, res: any) => {
   }
 });
 
-app.post('/swap/request', authenticateToken, [
-  body('targetEventId').notEmpty().withMessage('Target event ID is required').isMongoId().withMessage('Target event ID must be a valid MongoDB ObjectId'),
-  body('requesterEventId').notEmpty().withMessage('Requester event ID is required').isMongoId().withMessage('Requester event ID must be a valid MongoDB ObjectId'),
-  body('message').optional().isString(),
-  body('idempotencyKey').optional().isString().withMessage('Idempotency key must be a string')
-], async (req: any, res: any) => {
+// SIMPLIFIED SWAP REQUEST CREATION - New robust logic
+app.post('/swap/request', authenticateToken, async (req: any, res: any) => {
+  const startTime = Date.now();
+  console.log(`🚀 [${new Date().toISOString()}] Swap request started`);
+  
   try {
-    console.log('POST /swap/request - Request body:', req.body);
-    console.log('POST /swap/request - User:', req.user);
-    
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      console.log('Validation errors:', errors.array());
-      return res.status(400).json({ success: false, errors: errors.array() });
-    }
-
-    console.log('Connecting to database...');
-    await connectToDatabase();
-    console.log('Database connected successfully');
-
-    const { targetEventId, requesterEventId, message = '', idempotencyKey } = req.body;
+    // Basic validation first
+    const { targetEventId, requesterEventId, message = '' } = req.body;
     const requesterId = req.user?.userId;
 
-    // Handle idempotency to prevent duplicate requests from auto-refresh
-    if (idempotencyKey) {
-      console.log('Checking for existing request with idempotency key:', idempotencyKey);
-      const existingByKey = await SwapRequest.findOne({
-        requesterId: new mongoose.Types.ObjectId(requesterId),
-        targetEventId: new mongoose.Types.ObjectId(targetEventId),
-        requesterEventId: new mongoose.Types.ObjectId(requesterEventId),
-        message: { $regex: idempotencyKey, $options: 'i' }
-      });
-
-      if (existingByKey) {
-        console.log('Found existing request with idempotency key, returning existing request');
-        await existingByKey.populate([
-          { path: 'requesterId', select: 'name email' },
-          { path: 'targetUserId', select: 'name email' },
-          { path: 'requesterEventId', select: 'title startTime endTime' },
-          { path: 'targetEventId', select: 'title startTime endTime' }
-        ]);
-        
-        return res.status(200).json({ 
-          success: true, 
-          data: existingByKey,
-          message: 'Swap request already exists (idempotent)'
-        });
-      }
-    }
-
-    // Validate ObjectIds
-    if (!mongoose.Types.ObjectId.isValid(targetEventId)) {
-      console.log('Invalid targetEventId format:', targetEventId);
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Invalid target event ID format' 
-      });
-    }
-
-    if (!mongoose.Types.ObjectId.isValid(requesterEventId)) {
-      console.log('Invalid requesterEventId format:', requesterEventId);
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Invalid requester event ID format' 
-      });
-    }
-
-    if (!mongoose.Types.ObjectId.isValid(requesterId)) {
-      console.log('Invalid requesterId format:', requesterId);
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Invalid user ID format' 
-      });
-    }
-
-    console.log('Looking for requester event:', { requesterEventId, requesterId });
-    
-    // Verify the requester event belongs to the user
-    const requesterEvent = await Event.findOne({ 
-      _id: new mongoose.Types.ObjectId(requesterEventId), 
-      userId: new mongoose.Types.ObjectId(requesterId)
+    console.log('📝 Request data:', { 
+      targetEventId, 
+      requesterEventId, 
+      requesterId,
+      hasMessage: !!message 
     });
-    
-    if (!requesterEvent) {
-      console.log('Requester event not found');
-      // Let's also check if the event exists at all
-      const eventExists = await Event.findById(requesterEventId);
-      console.log('Event exists but wrong owner?', !!eventExists);
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Requester event not found or not owned by user' 
-      });
-    }
 
-    console.log('Found requester event:', requesterEvent);
-    console.log('Looking for target event:', { targetEventId });
-
-    // Verify the target event exists and is swappable
-    const targetEvent = await Event.findOne({ 
-      _id: new mongoose.Types.ObjectId(targetEventId), 
-      status: 'SWAPPABLE' 
-    });
-    
-    if (!targetEvent) {
-      console.log('Target event not found or not swappable');
-      // Let's check if the event exists but with wrong status
-      const eventExists = await Event.findById(targetEventId);
-      console.log('Target event exists?', !!eventExists);
-      if (eventExists) {
-        console.log('Target event status:', eventExists.status);
-      }
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Target event not found or not swappable' 
-      });
-    }
-
-    console.log('Found target event:', targetEvent);
-
-    // Prevent self-swapping
-    if (targetEvent.userId.toString() === requesterId.toString()) {
-      console.log('User trying to swap with themselves');
+    // Quick validation
+    if (!targetEventId || !requesterEventId) {
+      console.log('❌ Missing required fields');
       return res.status(400).json({ 
         success: false, 
-        message: 'Cannot create swap request with your own event' 
+        message: 'Target event ID and requester event ID are required' 
       });
     }
 
-    // Check if a request already exists (including recent ones to handle auto-refresh)
+    // Connect to database with timeout
+    console.log('🔌 Connecting to database...');
+    const dbStart = Date.now();
+    await Promise.race([
+      connectToDatabase(),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Database connection timeout')), 10000)
+      )
+    ]);
+    console.log(`✅ Database connected in ${Date.now() - dbStart}ms`);
+
+    // Simple ObjectId validation and conversion
+    let targetObjId, requesterObjId, requesterObjId2;
+    try {
+      targetObjId = new mongoose.Types.ObjectId(targetEventId);
+      requesterObjId = new mongoose.Types.ObjectId(requesterEventId);
+      requesterObjId2 = new mongoose.Types.ObjectId(requesterId);
+    } catch (err) {
+      console.log('❌ Invalid ObjectId format');
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Invalid ID format' 
+      });
+    }
+
+    // Check for existing request first (fastest check)
+    console.log('🔍 Checking for existing request...');
     const existingRequest = await SwapRequest.findOne({
-      requesterId: new mongoose.Types.ObjectId(requesterId),
-      targetEventId: new mongoose.Types.ObjectId(targetEventId),
-      requesterEventId: new mongoose.Types.ObjectId(requesterEventId),
-      status: { $in: ['PENDING', 'ACCEPTED'] }, // Include accepted to prevent re-requests
-      createdAt: { $gte: new Date(Date.now() - 5 * 60 * 1000) } // Within last 5 minutes
-    });
+      requesterId: requesterObjId2,
+      targetEventId: targetObjId,
+      requesterEventId: requesterObjId,
+      status: { $in: ['PENDING', 'ACCEPTED'] }
+    }).lean(); // Use lean for faster query
 
     if (existingRequest) {
-      console.log('Swap request already exists (recent or pending)');
-      
-      // Return the existing request instead of an error (better for auto-refresh scenarios)
-      await existingRequest.populate([
-        { path: 'requesterId', select: 'name email' },
-        { path: 'targetUserId', select: 'name email' },
-        { path: 'requesterEventId', select: 'title startTime endTime' },
-        { path: 'targetEventId', select: 'title startTime endTime' }
-      ]);
-      
+      console.log('✅ Found existing request, returning it');
       return res.status(200).json({ 
         success: true, 
         data: existingRequest,
-        message: `Swap request already exists with status: ${existingRequest.status}`
+        message: 'Swap request already exists',
+        fromCache: true
       });
     }
 
-    console.log('Creating new swap request...');
-
-    // Create the swap request with metadata for auto-refresh handling
-    const swapRequestData = {
-      requesterId: new mongoose.Types.ObjectId(requesterId),
-      targetUserId: new mongoose.Types.ObjectId(targetEvent.userId),
-      requesterEventId: new mongoose.Types.ObjectId(requesterEventId),
-      targetEventId: new mongoose.Types.ObjectId(targetEventId),
-      message: idempotencyKey ? `${message} [${idempotencyKey}]` : message
-    };
-
-    console.log('Creating swap request with data:', swapRequestData);
-    
-    const swapRequest = new SwapRequest(swapRequestData);
-
-    // Use a transaction to ensure atomicity and prevent race conditions
-    const session = await mongoose.startSession();
-    
-    try {
-      await session.withTransaction(async () => {
-        await swapRequest.save({ session });
-        console.log('Swap request saved successfully in transaction');
-      });
-    } finally {
-      await session.endSession();
-    }
-
-    // Populate the response
-    await swapRequest.populate([
-      { path: 'requesterId', select: 'name email' },
-      { path: 'targetUserId', select: 'name email' },
-      { path: 'requesterEventId', select: 'title startTime endTime' },
-      { path: 'targetEventId', select: 'title startTime endTime' }
+    // Batch fetch both events in parallel
+    console.log('📋 Fetching events in parallel...');
+    const [requesterEvent, targetEvent] = await Promise.all([
+      Event.findOne({ _id: requesterObjId, userId: requesterObjId2 }).lean(),
+      Event.findOne({ _id: targetObjId, status: 'SWAPPABLE' }).lean()
     ]);
 
-    console.log('Swap request populated and ready to return');
+    // Type assertion for lean queries
+    const requesterEventTyped = requesterEvent as any;
+    const targetEventTyped = targetEvent as any;
 
-    // Add headers to help with auto-refresh issues
-    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-    res.setHeader('Pragma', 'no-cache');
-    res.setHeader('Expires', '0');
+    // Validate events
+    if (!requesterEventTyped) {
+      console.log('❌ Requester event not found or not owned');
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Your event not found or you do not own it' 
+      });
+    }
+
+    if (!targetEventTyped) {
+      console.log('❌ Target event not found or not swappable');
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Target event not found or not available for swapping' 
+      });
+    }
+
+    // Prevent self-swapping
+    if (targetEventTyped.userId.toString() === requesterId.toString()) {
+      console.log('❌ Self-swap attempt');
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Cannot swap with your own event' 
+      });
+    }
+
+    // Create swap request (simple approach)
+    console.log('💾 Creating swap request...');
+    const swapRequestData = {
+      requesterId: requesterObjId2,
+      targetUserId: targetEventTyped.userId,
+      requesterEventId: requesterObjId,
+      targetEventId: targetObjId,
+      message: message || `Swap request from ${requesterEventTyped.title} to ${targetEventTyped.title}`,
+      status: 'PENDING'
+    };
+
+    const swapRequest = await SwapRequest.create(swapRequestData);
+    console.log('✅ Swap request created with ID:', swapRequest._id);
+
+    // Return minimal response for speed
+    const response = {
+      success: true,
+      data: {
+        _id: swapRequest._id,
+        requesterId: swapRequest.requesterId,
+        targetUserId: swapRequest.targetUserId,
+        requesterEventId: swapRequest.requesterEventId,
+        targetEventId: swapRequest.targetEventId,
+        status: swapRequest.status,
+        message: swapRequest.message,
+        createdAt: swapRequest.createdAt
+      },
+      executionTime: Date.now() - startTime
+    };
+
+    console.log(`🎉 Swap request completed in ${Date.now() - startTime}ms`);
     
-    res.status(201).json({ 
-      success: true, 
-      data: swapRequest,
-      timestamp: new Date().toISOString(),
-      requestId: swapRequest._id
-    });
+    res.status(201).json(response);
+
   } catch (error) {
-    console.error('Create swap request error:', error);
-    console.error('Error stack:', error.stack);
+    const executionTime = Date.now() - startTime;
+    console.error(`💥 Swap request failed after ${executionTime}ms:`, error.message);
+    console.error('Stack:', error.stack);
+    
+    // Production-safe error response
     res.status(500).json({ 
       success: false, 
-      message: 'Internal server error',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Server error'
+      message: 'Failed to create swap request',
+      executionTime,
+      errorCode: 'SWAP_CREATE_ERROR'
     });
   }
 });
