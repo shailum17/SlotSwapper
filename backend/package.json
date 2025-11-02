@@ -8,6 +8,7 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "test": "jest",
+    "deploy-check": "node scripts/deploy-check.js",
     "vercel-build": "echo 'No build needed for serverless functions'"
   },
   "keywords": [
