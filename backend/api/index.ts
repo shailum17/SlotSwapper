@@ -321,6 +321,92 @@ app.post('/api/debug/validate-ids', (req: any, res: any) => {
   });
 });
 
+// Check swap request status (helps with auto-refresh scenarios)
+app.get('/api/swap/request/status/:targetEventId/:requesterEventId', authenticateToken, async (req: any, res: any) => {
+  try {
+    await connectToDatabase();
+    
+    const { targetEventId, requesterEventId } = req.params;
+    const requesterId = req.user?.userId;
+    
+    if (!mongoose.Types.ObjectId.isValid(targetEventId) || !mongoose.Types.ObjectId.isValid(requesterEventId)) {
+      return res.status(400).json({ success: false, message: 'Invalid event IDs' });
+    }
+    
+    const swapRequest = await SwapRequest.findOne({
+      requesterId: new mongoose.Types.ObjectId(requesterId),
+      targetEventId: new mongoose.Types.ObjectId(targetEventId),
+      requesterEventId: new mongoose.Types.ObjectId(requesterEventId)
+    }).populate([
+      { path: 'requesterId', select: 'name email' },
+      { path: 'targetUserId', select: 'name email' },
+      { path: 'requesterEventId', select: 'title startTime endTime' },
+      { path: 'targetEventId', select: 'title startTime endTime' }
+    ]).sort({ createdAt: -1 });
+    
+    if (!swapRequest) {
+      return res.json({ 
+        success: true, 
+        exists: false, 
+        message: 'No swap request found' 
+      });
+    }
+    
+    res.json({ 
+      success: true, 
+      exists: true,
+      data: swapRequest,
+      status: swapRequest.status
+    });
+  } catch (error) {
+    console.error('Check swap request status error:', error);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+});
+
+// Same endpoint without /api prefix
+app.get('/swap/request/status/:targetEventId/:requesterEventId', authenticateToken, async (req: any, res: any) => {
+  try {
+    await connectToDatabase();
+    
+    const { targetEventId, requesterEventId } = req.params;
+    const requesterId = req.user?.userId;
+    
+    if (!mongoose.Types.ObjectId.isValid(targetEventId) || !mongoose.Types.ObjectId.isValid(requesterEventId)) {
+      return res.status(400).json({ success: false, message: 'Invalid event IDs' });
+    }
+    
+    const swapRequest = await SwapRequest.findOne({
+      requesterId: new mongoose.Types.ObjectId(requesterId),
+      targetEventId: new mongoose.Types.ObjectId(targetEventId),
+      requesterEventId: new mongoose.Types.ObjectId(requesterEventId)
+    }).populate([
+      { path: 'requesterId', select: 'name email' },
+      { path: 'targetUserId', select: 'name email' },
+      { path: 'requesterEventId', select: 'title startTime endTime' },
+      { path: 'targetEventId', select: 'title startTime endTime' }
+    ]).sort({ createdAt: -1 });
+    
+    if (!swapRequest) {
+      return res.json({ 
+        success: true, 
+        exists: false, 
+        message: 'No swap request found' 
+      });
+    }
+    
+    res.json({ 
+      success: true, 
+      exists: true,
+      data: swapRequest,
+      status: swapRequest.status
+    });
+  } catch (error) {
+    console.error('Check swap request status error:', error);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+});
+
 // Auth routes (with /api prefix)
 app.post('/api/auth/signup', [
   body('name').notEmpty().withMessage('Name is required'),
@@ -1302,7 +1388,8 @@ app.get('/swap/request', authenticateToken, async (req: any, res: any) => {
 app.post('/swap/request', authenticateToken, [
   body('targetEventId').notEmpty().withMessage('Target event ID is required').isMongoId().withMessage('Target event ID must be a valid MongoDB ObjectId'),
   body('requesterEventId').notEmpty().withMessage('Requester event ID is required').isMongoId().withMessage('Requester event ID must be a valid MongoDB ObjectId'),
-  body('message').optional().isString()
+  body('message').optional().isString(),
+  body('idempotencyKey').optional().isString().withMessage('Idempotency key must be a string')
 ], async (req: any, res: any) => {
   try {
     console.log('POST /swap/request - Request body:', req.body);
@@ -1318,8 +1405,35 @@ app.post('/swap/request', authenticateToken, [
     await connectToDatabase();
     console.log('Database connected successfully');
 
-    const { targetEventId, requesterEventId, message = '' } = req.body;
+    const { targetEventId, requesterEventId, message = '', idempotencyKey } = req.body;
     const requesterId = req.user?.userId;
+
+    // Handle idempotency to prevent duplicate requests from auto-refresh
+    if (idempotencyKey) {
+      console.log('Checking for existing request with idempotency key:', idempotencyKey);
+      const existingByKey = await SwapRequest.findOne({
+        requesterId: new mongoose.Types.ObjectId(requesterId),
+        targetEventId: new mongoose.Types.ObjectId(targetEventId),
+        requesterEventId: new mongoose.Types.ObjectId(requesterEventId),
+        message: { $regex: idempotencyKey, $options: 'i' }
+      });
+
+      if (existingByKey) {
+        console.log('Found existing request with idempotency key, returning existing request');
+        await existingByKey.populate([
+          { path: 'requesterId', select: 'name email' },
+          { path: 'targetUserId', select: 'name email' },
+          { path: 'requesterEventId', select: 'title startTime endTime' },
+          { path: 'targetEventId', select: 'title startTime endTime' }
+        ]);
+        
+        return res.status(200).json({ 
+          success: true, 
+          data: existingByKey,
+          message: 'Swap request already exists (idempotent)'
+        });
+      }
+    }
 
     // Validate ObjectIds
     if (!mongoose.Types.ObjectId.isValid(targetEventId)) {
@@ -1399,35 +1513,59 @@ app.post('/swap/request', authenticateToken, [
       });
     }
 
-    // Check if a request already exists
+    // Check if a request already exists (including recent ones to handle auto-refresh)
     const existingRequest = await SwapRequest.findOne({
       requesterId: new mongoose.Types.ObjectId(requesterId),
       targetEventId: new mongoose.Types.ObjectId(targetEventId),
       requesterEventId: new mongoose.Types.ObjectId(requesterEventId),
-      status: 'PENDING'
+      status: { $in: ['PENDING', 'ACCEPTED'] }, // Include accepted to prevent re-requests
+      createdAt: { $gte: new Date(Date.now() - 5 * 60 * 1000) } // Within last 5 minutes
     });
 
     if (existingRequest) {
-      console.log('Swap request already exists');
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Swap request already exists' 
+      console.log('Swap request already exists (recent or pending)');
+      
+      // Return the existing request instead of an error (better for auto-refresh scenarios)
+      await existingRequest.populate([
+        { path: 'requesterId', select: 'name email' },
+        { path: 'targetUserId', select: 'name email' },
+        { path: 'requesterEventId', select: 'title startTime endTime' },
+        { path: 'targetEventId', select: 'title startTime endTime' }
+      ]);
+      
+      return res.status(200).json({ 
+        success: true, 
+        data: existingRequest,
+        message: `Swap request already exists with status: ${existingRequest.status}`
       });
     }
 
     console.log('Creating new swap request...');
 
-    // Create the swap request
-    const swapRequest = new SwapRequest({
+    // Create the swap request with metadata for auto-refresh handling
+    const swapRequestData = {
       requesterId: new mongoose.Types.ObjectId(requesterId),
       targetUserId: new mongoose.Types.ObjectId(targetEvent.userId),
       requesterEventId: new mongoose.Types.ObjectId(requesterEventId),
       targetEventId: new mongoose.Types.ObjectId(targetEventId),
-      message
-    });
+      message: idempotencyKey ? `${message} [${idempotencyKey}]` : message
+    };
 
-    await swapRequest.save();
-    console.log('Swap request saved successfully');
+    console.log('Creating swap request with data:', swapRequestData);
+    
+    const swapRequest = new SwapRequest(swapRequestData);
+
+    // Use a transaction to ensure atomicity and prevent race conditions
+    const session = await mongoose.startSession();
+    
+    try {
+      await session.withTransaction(async () => {
+        await swapRequest.save({ session });
+        console.log('Swap request saved successfully in transaction');
+      });
+    } finally {
+      await session.endSession();
+    }
 
     // Populate the response
     await swapRequest.populate([
@@ -1439,9 +1577,16 @@ app.post('/swap/request', authenticateToken, [
 
     console.log('Swap request populated and ready to return');
 
+    // Add headers to help with auto-refresh issues
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    
     res.status(201).json({ 
       success: true, 
-      data: swapRequest 
+      data: swapRequest,
+      timestamp: new Date().toISOString(),
+      requestId: swapRequest._id
     });
   } catch (error) {
     console.error('Create swap request error:', error);
